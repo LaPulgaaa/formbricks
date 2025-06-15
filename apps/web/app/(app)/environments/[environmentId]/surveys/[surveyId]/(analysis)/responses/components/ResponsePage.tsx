@@ -1,7 +1,11 @@
 "use client";
 
 import { useResponseFilter } from "@/app/(app)/environments/[environmentId]/components/ResponseFilterContext";
-import { getResponsesAction } from "@/app/(app)/environments/[environmentId]/surveys/[surveyId]/(analysis)/actions";
+import {
+  getResponseCountAction,
+  getResponsesAction,
+} from "@/app/(app)/environments/[environmentId]/surveys/[surveyId]/(analysis)/actions";
+import ResponseCountView from "@/app/(app)/environments/[environmentId]/surveys/[surveyId]/(analysis)/responses/components/ResponseCountView";
 import { ResponseDataView } from "@/app/(app)/environments/[environmentId]/surveys/[surveyId]/(analysis)/responses/components/ResponseDataView";
 import { CustomFilter } from "@/app/(app)/environments/[environmentId]/surveys/[surveyId]/components/CustomFilter";
 import { ResultsShareButton } from "@/app/(app)/environments/[environmentId]/surveys/[surveyId]/components/ResultsShareButton";
@@ -48,7 +52,8 @@ export const ResponsePage = ({
   const [hasMore, setHasMore] = useState<boolean>(true);
   const [isFetchingFirstPage, setFetchingFirstPage] = useState<boolean>(true);
   const { selectedFilter, dateRange, resetState } = useResponseFilter();
-
+  const [filteredCount, setFilteredCount] = useState<number>(0);
+  const [totalCount, setTotalCount] = useState<number>(0);
   const filters = useMemo(
     () => getFormattedFilters(survey, selectedFilter, dateRange),
 
@@ -57,6 +62,45 @@ export const ResponsePage = ({
   );
 
   const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const fetchTotalCount = async () => {
+      const response = await getResponseCountAction({
+        surveyId: survey.id,
+        filterCriteria: {},
+      });
+
+      if (!response?.data) return;
+
+      setTotalCount(response.data);
+    };
+
+    fetchTotalCount();
+  }, [survey]);
+
+  useEffect(() => {
+    async function fetchFilteredCount() {
+      const response = await getResponseCountAction({
+        surveyId: survey.id,
+        filterCriteria: filters,
+      });
+
+      if (response?.data) setFilteredCount(response.data);
+    }
+
+    fetchFilteredCount();
+    // eslint-disable-next-line
+  }, [survey, selectedFilter, dateRange]);
+
+  const paginatedCount = useMemo(() => {
+    if (filteredCount <= responsesPerPage) return filteredCount;
+
+    const totalPages = Math.ceil(filteredCount / responsesPerPage);
+
+    if (page < totalPages) return responsesPerPage * page;
+
+    return totalCount;
+  }, [filteredCount, page, responsesPerPage, totalCount]);
 
   const fetchNextPage = useCallback(async () => {
     const newPage = page + 1;
@@ -109,6 +153,11 @@ export const ResponsePage = ({
   }, [searchParams, resetState]);
 
   useEffect(() => {
+    if (totalCount === 0) {
+      setFetchingFirstPage(false);
+      return;
+    }
+
     const fetchInitialResponses = async () => {
       try {
         setFetchingFirstPage(true);
@@ -143,7 +192,7 @@ export const ResponsePage = ({
       }
     };
     fetchInitialResponses();
-  }, [surveyId, filters, responsesPerPage, sharingKey, isSharingPage]);
+  }, [totalCount, surveyId, filters, responsesPerPage, sharingKey, isSharingPage]);
 
   useEffect(() => {
     setPage(1);
@@ -157,6 +206,11 @@ export const ResponsePage = ({
         <CustomFilter survey={surveyMemoized} />
         {!isReadOnly && !isSharingPage && <ResultsShareButton survey={survey} webAppUrl={webAppUrl} />}
       </div>
+      <ResponseCountView
+        totalCount={totalCount}
+        filteredCount={filteredCount}
+        paginatedCount={paginatedCount}
+      />
       <ResponseDataView
         survey={survey}
         responses={responses}
